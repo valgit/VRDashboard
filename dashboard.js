@@ -70,6 +70,8 @@ var controller = function () {
 
     var selRace, cbRouter, cbReuseTab, cbLocalTime;
     var lbBoatname, lbTeamname;
+    var lbTemperature;
+    var temperature;
     var divPositionInfo, divRecordLog, divRawLog;
     var callRouterFunction;
     var initialized = false;
@@ -1799,7 +1801,7 @@ var controller = function () {
 
         // track
         var tpath = [];
-        if (race.track) {
+        if (race.track) {            
             for (var i = 0; i < race.track.length; i++) {
                 tpath.push(new google.maps.LatLng(race.track[i].lat, race.track[i].lon));
             }
@@ -2013,9 +2015,11 @@ var controller = function () {
     }
 
     function sendNMEA () {
-        if (cbNMEAOutput.checked) {
+        if (cbNMEAOutput.checked) {            
             races.forEach(function (r) {
                 if (r.curr) {
+                    var mtw = formatMTW(temperature);
+                    sendSentence(r.id, "$" + mtw + "*" + nmeaChecksum(mtw));
                     var rmc = formatGNRMC(r.curr);
                     var mwv = formatINMWV(r.curr);
                     sendSentence(r.id, "$" + rmc + "*" + nmeaChecksum(rmc)); 
@@ -2071,12 +2075,40 @@ var controller = function () {
         return pad0(result, len);
     }
     
+    function formatMTW(temp) {
+        // $GPMTW water temperature
+        var s = "GPMTW";
+        s += "," + temp;
+        s += ",'C";
+        return s;
+    }
+
     function nmeaChecksum (s) {
         var sum = 0;
         for (var i = 0; i < s.length; i++) {
             sum ^= s.charCodeAt(i);
         }
         return pad0(sum, 2, 16).toUpperCase();
+    }
+
+    function sendPolar (sentence) {
+        var request = new XMLHttpRequest();
+        request.open("POST", "http://localhost:" + nmeaPort + "/polar/" , true);
+        request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        request.onerror = function (data) {
+            console.log(data);
+        };
+        request.send(sentence);
+    }
+
+    function sendGPX (sentence) {
+        var request = new XMLHttpRequest();
+        request.open("POST", "http://localhost:" + nmeaPort + "/gpx/" , true);
+        request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        request.onerror = function (data) {
+            console.log(data);
+        };
+        request.send(sentence);
     }
 
     function filterChanged (e) {
@@ -2119,6 +2151,9 @@ var controller = function () {
         divRecordLog.innerHTML = makeTableHTML();
         cbRawLog = document.getElementById("cb_rawlog");
         divRawLog = document.getElementById("rawlog");
+
+        lbTemperature = document.getElementById("lb_temperature");
+
         initRaces();
 
         chrome.storage.local.get("polars", function (items) {
@@ -2451,7 +2486,7 @@ var controller = function () {
                         chrome.storage.local.set({
                             "polars": polars
                         });
-                        console.info("Stored polars " + response.scriptData.polar.label);
+                        sendPolar(response.scriptData.polar);
                     } else if (request.eventKey == "Shop_GetCardsPack") {
                         var card = races.get(getRaceLegId(request)).curr.soloCard;
                         card.code = response.scriptData.packs[0].code;
@@ -2489,8 +2524,10 @@ var controller = function () {
                         var ndata = rfd.uinfo[uid];
 
                         if (race) {
+                            sendGPX(response.scriptData.track);
                             if (uid == race.curr._id.user_id) {
                                 race.track = response.scriptData.track;
+                                
                                 updateMapMe(race);
                             } else if (ndata) {
                                 ndata.track = response.scriptData.track;
@@ -2522,8 +2559,13 @@ var controller = function () {
                         }
                         var race = races.get(raceId);
                         updateMapFleet(race);
+                    } else if (request.eventKey == "Game_GetWeather") {
+                        temperature = response.scriptData.weather.temperature.value;
+                        precipitation = response.scriptData.weather.precipIntensity.value;                        
+                        lbTemperature.innerHTML = temperature;
+                        console.info("temp :" + temperature + " precip : " + precipitation);
                     }
-                } else if (responseClass == ".ScriptMessage") {
+                }  else if (responseClass == ".ScriptMessage") {
                     // There is no request for .ScriptMessages.
                     // The ScriptMessage type can be :
                     //      extCode=boatStatePush
