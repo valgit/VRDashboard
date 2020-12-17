@@ -1,8 +1,11 @@
+# coding: utf-8 
+
 import http.server
 import socketserver
 import socket
 import argparse
 import logging
+import threading
 
 parser = argparse.ArgumentParser()
 
@@ -44,6 +47,7 @@ class NMEAHandler(http.server.BaseHTTPRequestHandler):
 
 def forward_message(conn_id, message):
     conn = find_or_create_connection(conn_id)
+    # should loop on all conn
     if conn:
         try:
             conn.send(message + '\r\n'.encode('ascii'))
@@ -55,27 +59,50 @@ def forward_message(conn_id, message):
 
 
 def find_or_create_connection(conn_id):
+    # open the server connection if needed
+    if conn_id not in sockets:            
+        newthread = AcceptThread(conn_id)
+        newthread.start()
+
     if conn_id in connections:
         return connections[conn_id]
     else:
-        conn = None
-        if conn_id not in sockets:
-            sockets[conn_id] = create_socket(conn_id)
-        conn = accept_connection(sockets[conn_id])
-        if conn:
-            connections[conn_id] = conn
+        conn = None                
         return conn
 
 
 def create_socket(conn_id):
-    logging.info('Creating socket for race ID ' + str(conn_id))
+    logging.info('Creating NMEA socket for race ID ' + str(conn_id))
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.setblocking(False)
-    sock.bind((HOST, OUTPORT + conn_id))
-    sock.listen(0)
+    try:
+        sock.bind((HOST, OUTPORT + conn_id))
+    except socket.error as e:
+        logging.info(str(e))
+
+    sock.listen(5)
     return sock
 
+
+# acceptthread
+
+class AcceptThread(threading.Thread):
+    def __init__(self,conn_id):
+        super().__init__()
+        self.conn_id = conn_id
+        sockets[conn_id] = create_socket(conn_id)
+
+    def run(self): 
+        logging.debug('running with conn %s', self.conn_id)
+        while True:  
+            conn = accept_connection(sockets[self.conn_id])
+            logging.debug('got conn %s', self.conn_id)
+        #    add conn to table
+            if conn:
+                connections[self.conn_id] = conn
+    
+    
 
 def accept_connection(sock):
     try:
@@ -87,9 +114,10 @@ def accept_connection(sock):
         return None
 
 
-logging.basicConfig(level=logging.INFO)
 
-logging.info("Creating Server")
+logging.basicConfig(level=logging.DEBUG)
+
+logging.info("Creating httpd Server")
 server = socketserver.TCPServer(("", PORT), NMEAHandler)
 logging.info("httpd listening on port " + str(PORT))
 
