@@ -18,6 +18,7 @@ var controller = function () {
 
     var races = new Map();
     var raceFleetMap = new Map();
+    var waypoints = [];
 
     var showMarkers = new Map();
 
@@ -1925,14 +1926,17 @@ var controller = function () {
         if (!race.curr) return; // current position unknown
         if (!map) return; // no map yet
         clearTrack(map,"_db_wp");
-
+        
         // track wp
         var tpath = [];
+        
         if (race.boatActions && race.boatActions.length > 0) {
             if (race.boatActions[0].pos) {
                 tpath.push(new google.maps.LatLng(race.curr.pos.lat, race.curr.pos.lon)); // boat
                 for (var i = 0; i < race.boatActions[0].pos.length; i++) {
                     tpath.push(new google.maps.LatLng(race.boatActions[0].pos[i].lat, race.boatActions[0].pos[i].lon));
+                    // store waypoint NMEA
+                    waypoints.push(race.boatActions[0].pos[i]);
                 }
                 var ttpath = makeTTPath(tpath,"#FF00FF");
                 ttpath.setMap(map);
@@ -2250,6 +2254,15 @@ var controller = function () {
                         var mwv = formatINMWV(r.curr);
                         sendSentence(r.id, "$" + rmc + "*" + nmeaChecksum(rmc));
                         sendSentence(r.id, "$" + mwv + "*" + nmeaChecksum(mwv));
+
+                        // send WP                        
+                        // TODO : find how to update
+                        for (var i = 0; i < waypoints.length; i++) {
+                            var wp_pos = waypoints[i];
+                            var wpl = formatWPL(wp_pos,i);
+                            sendSentence(r.id, "$" + wpl + "*" + nmeaChecksum(wpl));  
+                            //console.log("wp "+ wpl);                          
+                        }
                     }
                 });
             } catch (e) {
@@ -2297,6 +2310,18 @@ var controller = function () {
             console.log(data);
         };
         request.send(sentence);
+    }
+
+    function formatWPL (pos, name) {
+        // http://www.nmea.de/nmea0183datensaetze.html#wpl
+        // https://gpsd.gitlab.io/gpsd/NMEA.html#_wpl_waypoint_location        
+        var s = "GPWPL";
+        s += "," + formatNMEALatLon(Math.abs(pos.lat), 9); // Latitude & N/S
+        s += "," + ((pos.lat < 0) ? "S":"N");
+        s += "," + formatNMEALatLon(Math.abs(pos.lon), 10); // Longitude & E/W
+        s += "," + ((pos.lon < 0) ? "W":"E");
+        s += "," + name;      // wp name 
+        return s;
     }
 
     function formatGNRMC (m) {
